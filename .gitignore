@@ -1,0 +1,14 @@
+echo "__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+.cache
+.idea
+.vscode
+__pycache__/
+*.log
+*.sqlite3
+/home/admin/.cache/pypoetry/
+" > .gitignore
