@@ -9,19 +9,21 @@ import logging
 
 from abc import ABC, abstractmethod
 from aiolimiter import AsyncLimiter
+from typing import TypeVar, TypeAlias
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+JSONPrimitive: TypeAlias = str | int | float | bool | None
+JSONValue: TypeAlias = JSONPrimitive | list["JSONValue"] | dict[str, "JSONValue"]
+JSONType: TypeAlias = dict[str, JSONValue] | list[JSONValue]
+ResponseBody: TypeAlias = JSONType | str | bytes
+
+T = TypeVar("T", bound=ResponseBody)
+
 class BaseClient(ABC):
     """
     Базовый асинхронный клиент для API-источников.
-
-    Отвечает за:
-      - управление сессией aiohttp;
-      - базовую авторизацию (токен);
-      - ограничение частоты запросов (через aiolimiter);
-      - настройку backoff-ретраев в потомках.
     """
 
     def __init__(
@@ -60,7 +62,6 @@ class BaseClient(ABC):
         self.timeout: int = timeout
         self.backoff_max_tries: int = backoff_max_tries or max_retries
 
-        # aiolimiter — ограничение скорости
         self.limiter: AsyncLimiter = limiter or AsyncLimiter(max_rate, rate_period)
 
         self._session: aiohttp.ClientSession | None = None
@@ -74,18 +75,26 @@ class BaseClient(ABC):
         )
 
     async def __aenter__(self) -> BaseClient:
-        """Асинхронный вход в контекстный менеджер — создаёт aiohttp-сессию."""
+        """
+        Асинхронный вход в контекстный менеджер.
+        """
         await self._ensure_session()
         logger.debug("Aiohttp session entered for %s", self.base_url)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Асинхронный выход из контекста — безопасно закрывает aiohttp-сессию."""
+        """
+        Асинхронный выход из контекста.
+        """
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("Aiohttp session closed for %s", self.base_url)
 
     async def _ensure_session(self) -> None:
+        """
+        Гарантирует наличие открытой aiohttp-сессии.
+        Создаёт новую сессию, если текущая отсутствует или закрыта.
+        """
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
@@ -94,3 +103,76 @@ class BaseClient(ABC):
             )
             logger.debug("Created aiohttp ClientSession for %s", self.base_url)
 
+
+    @backoff.on_exception(
+        backoff.expo,
+        (aiohttp.ClientError, asyncio.TimeoutError),
+        max_tries=lambda self: self.backoff_max_tries,
+        jitter=backoff.full_jitter,
+        logger=logger,
+    )
+    async def _request(
+            self,
+            method: str,
+            endpoint: str,
+            *,
+            params: dict[str, str] | None = None,
+            json: JSONType | None = None,
+            data: bytes | str | None = None,
+            headers: dict[str, str] | None = None,
+    ) -> T:
+        """
+        Выполняет асинхронный HTTP-запрос с учётом лимитов и повторных попыток.
+        """
+
+        await self._ensure_session()
+
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        merged_headers = {**self.headers, **(headers or {})}
+
+        async with self.limiter:
+            async with self._session.request(
+                    method=method.upper(),
+                    url=url,
+                    params=params,
+                    json=json,
+                    data=data,
+                    headers=merged_headers,
+            ) as resp:
+                if resp.status >= 400:
+                    # читаемый и безопасный вывод ошибки
+                    body = await resp.text()
+                    logger.warning("Request %s %s failed (%d): %s", method, url, resp.status, body)
+                    resp.raise_for_status()
+
+                try:
+                    return await resp.json()
+                except aiohttp.ContentTypeError:
+                    return await resp.text()
+
+    async def get(
+            self,
+            endpoint: str,
+            *,
+            params: dict[str, str] | None = None,
+            headers: dict[str, str] | None = None,
+    ) -> ResponseBody:
+        """Выполняет GET-запрос к API."""
+        return await self._request("GET", endpoint, params=params, headers=headers)
+
+    async def post(
+            self,
+            endpoint: str,
+            *,
+            json: JSONType | None = None,
+            data: bytes | str | None = None,
+            headers: dict[str, str] | None = None,
+    ) -> ResponseBody:
+        """Выполняет POST-запрос к API."""
+        return await self._request("POST", endpoint, json=json, data=data, headers=headers)
+
+
+    @abstractmethod
+    async def normalize(self, data: ResponseBody) -> ResponseBody:
+        """Нормализует данные ответа API. Реализуется в наследниках."""
+        raise NotImplementedError
