@@ -21,6 +21,7 @@ ResponseBody: TypeAlias = JSONType | str | bytes
 
 T = TypeVar("T", bound=ResponseBody)
 
+
 class BaseClient(ABC):
     """
     Базовый асинхронный клиент для API-источников.
@@ -97,12 +98,8 @@ class BaseClient(ABC):
         """
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
-            self._session = aiohttp.ClientSession(
-                headers=self.headers,
-                timeout=timeout
-            )
+            self._session = aiohttp.ClientSession(headers=self.headers, timeout=timeout)
             logger.debug("Created aiohttp ClientSession for %s", self.base_url)
-
 
     @backoff.on_exception(
         backoff.expo,
@@ -112,14 +109,14 @@ class BaseClient(ABC):
         logger=logger,
     )
     async def _request(
-            self,
-            method: str,
-            endpoint: str,
-            *,
-            params: dict[str, str] | None = None,
-            json: JSONType | None = None,
-            data: bytes | str | None = None,
-            headers: dict[str, str] | None = None,
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: JSONType | None = None,
+        data: bytes | str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> T:
         """
         Выполняет асинхронный HTTP-запрос с учётом лимитов и повторных попыток.
@@ -132,17 +129,19 @@ class BaseClient(ABC):
 
         async with self.limiter:
             async with self._session.request(
-                    method=method.upper(),
-                    url=url,
-                    params=params,
-                    json=json,
-                    data=data,
-                    headers=merged_headers,
+                method=method.upper(),
+                url=url,
+                params=params,
+                json=json,
+                data=data,
+                headers=merged_headers,
             ) as resp:
                 if resp.status >= 400:
                     # читаемый и безопасный вывод ошибки
                     body = await resp.text()
-                    logger.warning("Request %s %s failed (%d): %s", method, url, resp.status, body)
+                    logger.warning(
+                        "Request %s %s failed (%d): %s", method, url, resp.status, body
+                    )
                     resp.raise_for_status()
 
                 try:
@@ -151,26 +150,27 @@ class BaseClient(ABC):
                     return await resp.text()
 
     async def get(
-            self,
-            endpoint: str,
-            *,
-            params: dict[str, str] | None = None,
-            headers: dict[str, str] | None = None,
+        self,
+        endpoint: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> ResponseBody:
         """Выполняет GET-запрос к API."""
         return await self._request("GET", endpoint, params=params, headers=headers)
 
     async def post(
-            self,
-            endpoint: str,
-            *,
-            json: JSONType | None = None,
-            data: bytes | str | None = None,
-            headers: dict[str, str] | None = None,
+        self,
+        endpoint: str,
+        *,
+        json: JSONType | None = None,
+        data: bytes | str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> ResponseBody:
         """Выполняет POST-запрос к API."""
-        return await self._request("POST", endpoint, json=json, data=data, headers=headers)
-
+        return await self._request(
+            "POST", endpoint, json=json, data=data, headers=headers
+        )
 
     @abstractmethod
     async def normalize(self, data: ResponseBody) -> ResponseBody:

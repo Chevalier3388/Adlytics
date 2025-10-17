@@ -6,6 +6,7 @@ from aioresponses import aioresponses
 from ingestion.base_client import ResponseBody
 from tests.conftest import DummyClient
 
+
 @pytest.mark.asyncio
 async def test_get_request(client: DummyClient):
     """
@@ -50,8 +51,6 @@ async def test_post_request(client: DummyClient):
         assert response == expected
 
 
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "initial_session_state, expect_new_session",
@@ -59,11 +58,10 @@ async def test_post_request(client: DummyClient):
         (None, True),
         ("open", False),
         ("closed", True),
-    ]
+    ],
 )
 async def test_ensure_session_parametrized(initial_session_state, expect_new_session):
     client = DummyClient("https://api.test.com")
-
 
     if initial_session_state == "open":
         client._session = aiohttp.ClientSession()
@@ -85,7 +83,6 @@ async def test_ensure_session_parametrized(initial_session_state, expect_new_ses
 
         assert client._session == old_session
         assert not client._session.closed
-
 
     if client._session and not client._session.closed:
         await client._session.close()
