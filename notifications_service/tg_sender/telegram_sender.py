@@ -8,11 +8,11 @@ logger = logging.getLogger("telegram_sender")
 
 
 class TelegramSender(BaseSender):
+    """Отправка уведомлений через Telegram."""
     def __init__(self):
         self.bot: Bot = get_bot()
         logger.info("TelegramSender: отправитель создан")
 
-        # Словарь для вызова нужного метода по типу сообщения
         self._send_methods = {
             "text": self._send_text,
             "photo": self._send_photo,
